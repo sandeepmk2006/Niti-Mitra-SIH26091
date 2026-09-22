@@ -1,20 +1,24 @@
 /**
- * Home — greeting, entry point into the Evaluate chat, live stats and recent activity.
+ * Home — entry points to the three tools (feasibility study, calculator, advisor), a live quick
+ * loan check, and the user's recent studies.
  */
 
-import React from "react";
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import React, { useMemo, useState } from "react";
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 
-import { Button, SectionLabel } from "../../src/components/ui";
+import { SchemeBadge } from "../../src/components/badges";
+import { StudyCard } from "../../src/components/cards";
 import { Logo } from "../../src/components/Logo";
-import { SessionCard } from "../../src/components/SessionCard";
+import { MoneyInput } from "../../src/components/MoneyInput";
+import { Button, SectionLabel } from "../../src/components/ui";
 import { useAuth } from "../../src/context/AuthContext";
-import { useChat } from "../../src/context/ChatContext";
-import { useSessions } from "../../src/hooks/useSessions";
+import { useStudies } from "../../src/hooks/useSessions";
 import { useI18n } from "../../src/i18n/I18nContext";
+import { computeFinancialPlan } from "../../src/services/schemeCalculator";
+import { formatINR } from "../../src/utils/format";
 import { BorderRadius, Colors, FontSize, Shadows, Spacing } from "../../src/constants/theme";
 
 const RECENT_COUNT = 3;
@@ -24,184 +28,150 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { t } = useI18n();
-  const { hasConversation, stage, startNewChat } = useChat();
-  const { sessions, loading } = useSessions();
-
-  const evaluations = sessions.filter((s) => s.report);
-  const schemesMatched = evaluations.reduce(
-    (sum, s) => sum + (s.report?.schemes.filter((scheme) => scheme.status === "eligible").length ?? 0),
-    0
-  );
-  const canContinue = hasConversation && stage !== "evaluated";
-
-  const openEvaluate = (fresh: boolean) => {
-    if (fresh) startNewChat();
-    router.navigate("/(tabs)/evaluate");
-  };
+  const { studies, loading } = useStudies();
+  const [margin, setMargin] = useState<number | null>(50_000);
+  const plan = useMemo(() => (margin ? computeFinancialPlan(margin) : null), [margin]);
 
   return (
     <ScrollView
       style={styles.container}
       contentContainerStyle={[styles.content, { paddingTop: insets.top + Spacing.md }]}
       showsVerticalScrollIndicator={false}
+      keyboardShouldPersistTaps="handled"
     >
-      {/* Greeting */}
-      <View style={styles.greetingRow}>
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>{(user?.fullName ?? "?").slice(0, 1).toUpperCase()}</Text>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <Logo size={44} badge />
         <View style={{ flex: 1 }}>
           <Text style={styles.greeting} numberOfLines={1}>
             {t("home.greeting", { name: user?.fullName ?? "" })}
           </Text>
-          <Text style={styles.appTag}>{t("app.name")} · {t("app.tagline")}</Text>
+          <Text style={styles.subtitle}>{t("home.subtitle")}</Text>
         </View>
+        <TouchableOpacity
+          onPress={() => router.push("/settings")}
+          style={styles.settings}
+          accessibilityRole="button"
+          accessibilityLabel={t("settings.title")}
+        >
+          <Ionicons name="settings-outline" size={22} color={Colors.textPrimary} />
+        </TouchableOpacity>
       </View>
 
-      {/* Hero */}
+      {/* Feasibility study */}
       <View style={styles.hero}>
         <View style={styles.heroTop}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.heroBadgeText}>{t("chat.subtitle")}</Text>
-            <Text style={styles.heroTitle}>{t("home.heroTitle")}</Text>
+          <View style={styles.heroIcon}>
+            <Ionicons name="analytics" size={24} color={Colors.textInverse} />
           </View>
-          <Logo size={72} />
+          <Text style={styles.heroTitle}>{t("home.studyTitle")}</Text>
         </View>
-        <Text style={styles.heroBody}>{t("home.heroBody")}</Text>
-        <Button label={t("home.startCta")} icon="add-circle-outline" onPress={() => openEvaluate(true)} />
+        <Text style={styles.heroBody}>{t("home.studyBody")}</Text>
+        <View style={styles.steps}>
+          {(["home.step1", "home.step2", "home.step3"] as const).map((key, i) => (
+            <View key={key} style={styles.step}>
+              <View style={styles.stepNum}>
+                <Text style={styles.stepNumText}>{i + 1}</Text>
+              </View>
+              <Text style={styles.stepText}>{t(key)}</Text>
+            </View>
+          ))}
+        </View>
+        <Button label={t("home.studyCta")} icon="add-circle-outline" onPress={() => router.navigate("/(tabs)/study")} />
       </View>
 
-      {canContinue ? (
+      {/* Quick loan check */}
+      <View style={styles.card}>
+        <View style={styles.cardHead}>
+          <Ionicons name="calculator-outline" size={20} color={Colors.primaryText} />
+          <Text style={styles.cardTitle}>{t("home.calcTitle")}</Text>
+        </View>
+        <Text style={styles.cardBody}>{t("home.calcBody")}</Text>
+        <MoneyInput value={margin} onChange={setMargin} />
+        {plan ? (
+          <View style={styles.quick}>
+            <View style={styles.quickRow}>
+              <Quick label={t("calc.projectCost")} value={formatINR(plan.projectCost)} />
+              <Quick label={t("calc.loanAmount")} value={formatINR(plan.loanAmount)} />
+              <Quick label={t("calc.quarterly")} value={formatINR(plan.quarterlyInstalment)} />
+            </View>
+            <SchemeBadge scheme={plan.scheme.id} />
+          </View>
+        ) : null}
         <Button
-          label={t("home.continueCta")}
-          icon="chatbubbles-outline"
+          label={t("home.calcCta")}
+          icon="arrow-forward"
           variant="secondary"
-          onPress={() => openEvaluate(false)}
-          style={{ marginBottom: Spacing.lg }}
+          onPress={() =>
+            router.navigate(margin ? { pathname: "/(tabs)/calculator", params: { margin: String(margin) } } : "/(tabs)/calculator")
+          }
         />
-      ) : null}
-
-      {/* Stats */}
-      <View style={styles.stats}>
-        <Stat icon="chatbubbles" value={sessions.length} label={t("home.statChats")} loading={loading} />
-        <Stat icon="analytics" value={evaluations.length} label={t("home.statEvaluations")} loading={loading} />
-        <Stat icon="ribbon" value={schemesMatched} label={t("home.statSchemes")} loading={loading} />
       </View>
 
-      {/* Recent activity */}
+      {/* Advisor */}
+      <TouchableOpacity style={[styles.card, styles.advisor]} activeOpacity={0.8} onPress={() => router.navigate("/(tabs)/advisor")}>
+        <View style={styles.advisorIcon}>
+          <Ionicons name="chatbubbles" size={22} color={Colors.primaryText} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.cardTitle}>{t("home.advisorTitle")}</Text>
+          <Text style={styles.cardBody}>{t("home.advisorBody")}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
+      </TouchableOpacity>
+
+      {/* Recent studies */}
       <View style={styles.sectionHeader}>
-        <SectionLabel>{t("home.recent")}</SectionLabel>
-        {sessions.length > RECENT_COUNT ? (
+        <SectionLabel>{t("home.recentStudies")}</SectionLabel>
+        {studies.length > RECENT_COUNT ? (
           <TouchableOpacity onPress={() => router.navigate("/(tabs)/history")} hitSlop={8}>
             <Text style={styles.seeAll}>{t("home.seeAll")}</Text>
           </TouchableOpacity>
         ) : null}
       </View>
-      {loading ? (
-        <ActivityIndicator color={Colors.primary} style={{ marginVertical: Spacing.lg }} />
-      ) : sessions.length === 0 ? (
-        <View style={styles.emptyRecent}>
-          <Ionicons name="time-outline" size={20} color={Colors.textMuted} />
-          <Text style={styles.emptyRecentText}>{t("home.noActivity")}</Text>
+      {!loading && studies.length === 0 ? (
+        <View style={styles.empty}>
+          <Ionicons name="document-text-outline" size={20} color={Colors.textMuted} />
+          <Text style={styles.emptyText}>{t("home.noStudies")}</Text>
         </View>
       ) : (
         <View style={{ gap: 12 }}>
-          {sessions.slice(0, RECENT_COUNT).map((session) => (
-            <SessionCard
-              key={session.id}
-              session={session}
-              onPress={() => router.push({ pathname: "/session/[id]", params: { id: session.id } })}
-            />
+          {studies.slice(0, RECENT_COUNT).map((study) => (
+            <StudyCard key={study.id} study={study} onPress={() => router.push({ pathname: "/study/[id]", params: { id: study.id } })} />
           ))}
         </View>
       )}
-
-      {/* How it works */}
-      <View style={{ marginTop: Spacing.xl }}>
-        <SectionLabel>{t("home.howItWorks")}</SectionLabel>
-        <View style={styles.steps}>
-          <Step n={1} icon="chatbubble-ellipses" title={t("home.step1Title")} body={t("home.step1Body")} />
-          <Step n={2} icon="document-text" title={t("home.step2Title")} body={t("home.step2Body")} />
-          <Step n={3} icon="ribbon" title={t("home.step3Title")} body={t("home.step3Body")} last />
-        </View>
-      </View>
     </ScrollView>
   );
 }
 
-function Stat({
-  icon,
-  value,
-  label,
-  loading,
-}: {
-  icon: keyof typeof Ionicons.glyphMap;
-  value: number;
-  label: string;
-  loading: boolean;
-}) {
+function Quick({ label, value }: { label: string; value: string }) {
   return (
-    <View style={styles.stat}>
-      <View style={styles.statIcon}>
-        <Ionicons name={icon} size={16} color={Colors.primaryText} />
-      </View>
-      <Text style={styles.statValue}>{loading ? "–" : value}</Text>
-      <Text style={styles.statLabel} numberOfLines={2}>
-        {label}
+    <View style={{ flex: 1 }}>
+      <Text style={styles.quickLabel}>{label}</Text>
+      <Text style={styles.quickValue} numberOfLines={1} adjustsFontSizeToFit>
+        {value}
       </Text>
-    </View>
-  );
-}
-
-function Step({
-  n,
-  icon,
-  title,
-  body,
-  last = false,
-}: {
-  n: number;
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  body: string;
-  last?: boolean;
-}) {
-  return (
-    <View style={styles.step}>
-      <View style={styles.stepRail}>
-        <View style={styles.stepBadge}>
-          <Ionicons name={icon} size={16} color={Colors.primaryText} />
-        </View>
-        {!last && <View style={styles.stepLine} />}
-      </View>
-      <View style={{ flex: 1, paddingBottom: last ? 0 : Spacing.md }}>
-        <Text style={styles.stepTitle}>
-          {n}. {title}
-        </Text>
-        <Text style={styles.stepBody}>{body}</Text>
-      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  content: { paddingHorizontal: 20, paddingBottom: Spacing.xl },
+  content: { paddingHorizontal: 20, paddingBottom: Spacing.xxl, gap: 14 },
 
-  greetingRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: Spacing.lg },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.primarySoft,
+  header: { flexDirection: "row", alignItems: "center", gap: 12 },
+  greeting: { fontSize: FontSize.lg, fontWeight: "800", color: Colors.textPrimary },
+  subtitle: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2, lineHeight: 16 },
+  settings: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     borderWidth: 1,
-    borderColor: Colors.primaryBorder,
+    borderColor: Colors.border,
     alignItems: "center",
     justifyContent: "center",
   },
-  avatarText: { fontSize: FontSize.lg, fontWeight: "800", color: Colors.primaryText },
-  greeting: { fontSize: FontSize.lg, fontWeight: "800", color: Colors.textPrimary },
-  appTag: { fontSize: FontSize.xs, color: Colors.textSecondary, marginTop: 2 },
 
   hero: {
     backgroundColor: Colors.surfacePrimary,
@@ -211,47 +181,63 @@ const styles = StyleSheet.create({
     borderTopWidth: 4,
     borderTopColor: Colors.primary,
     padding: 18,
-    marginBottom: Spacing.md,
     gap: 12,
     ...Shadows.card,
   },
   heroTop: { flexDirection: "row", alignItems: "center", gap: 12 },
-  heroBadgeText: {
-    fontSize: FontSize.xs,
-    fontWeight: "700",
-    color: Colors.primaryText,
-    letterSpacing: 0.6,
-    textTransform: "uppercase",
-    marginBottom: 4,
+  heroIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  heroTitle: { fontSize: 22, fontWeight: "800", color: Colors.textPrimary, lineHeight: 28 },
+  heroTitle: { flex: 1, fontSize: FontSize.lg, fontWeight: "800", color: Colors.textPrimary },
   heroBody: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 20 },
+  steps: { gap: 8 },
+  step: { flexDirection: "row", alignItems: "center", gap: 10 },
+  stepNum: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: Colors.primarySoft,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepNumText: { fontSize: FontSize.xs, fontWeight: "800", color: Colors.primaryText },
+  stepText: { flex: 1, fontSize: FontSize.sm, color: Colors.textPrimary, fontWeight: "600" },
 
-  stats: { flexDirection: "row", gap: 10, marginBottom: Spacing.xl },
-  stat: {
-    flex: 1,
+  card: {
     backgroundColor: Colors.surfacePrimary,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     borderColor: Colors.border,
-    padding: 12,
+    padding: Spacing.md,
+    gap: 10,
     ...Shadows.card,
   },
-  statIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: BorderRadius.sm,
+  cardHead: { flexDirection: "row", alignItems: "center", gap: 8 },
+  cardTitle: { fontSize: FontSize.md, fontWeight: "800", color: Colors.textPrimary },
+  cardBody: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 19 },
+  quick: { backgroundColor: Colors.primarySoft, borderRadius: BorderRadius.md, padding: 12, gap: 10 },
+  quickRow: { flexDirection: "row", gap: 8 },
+  quickLabel: { fontSize: 10, color: Colors.textSecondary, fontWeight: "600" },
+  quickValue: { fontSize: FontSize.base, fontWeight: "800", color: Colors.textPrimary, marginTop: 2 },
+
+  advisor: { flexDirection: "row", alignItems: "center", gap: 12 },
+  advisorIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: Colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 8,
   },
-  statValue: { fontSize: 22, fontWeight: "800", color: Colors.textPrimary },
-  statLabel: { fontSize: FontSize.xs, color: Colors.textSecondary, fontWeight: "600", marginTop: 2 },
 
-  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline" },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "baseline", marginTop: 6 },
   seeAll: { fontSize: FontSize.sm, fontWeight: "700", color: Colors.primaryText },
-  emptyRecent: {
+  empty: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
@@ -261,27 +247,5 @@ const styles = StyleSheet.create({
     borderStyle: "dashed",
     borderColor: Colors.borderStrong,
   },
-  emptyRecentText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 19 },
-
-  steps: {
-    backgroundColor: Colors.surfacePrimary,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: Spacing.md,
-    ...Shadows.card,
-  },
-  step: { flexDirection: "row", gap: 12 },
-  stepRail: { alignItems: "center" },
-  stepBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primarySoft,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  stepLine: { flex: 1, width: 2, backgroundColor: Colors.primaryBorder, marginVertical: 4 },
-  stepTitle: { fontSize: FontSize.base, fontWeight: "700", color: Colors.textPrimary },
-  stepBody: { fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 19, marginTop: 2 },
+  emptyText: { flex: 1, fontSize: FontSize.sm, color: Colors.textSecondary, lineHeight: 19 },
 });

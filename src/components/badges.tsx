@@ -4,8 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { useI18n } from "../i18n/I18nContext";
 import type { TranslationKey } from "../i18n/translations/en";
-import type { RiskLevel } from "../types/evaluation";
-import type { SessionStage } from "../types/session";
+import type { RiskLevel, SchemeId } from "../services/schemeCalculator";
 import { BorderRadius, Colors, FontSize } from "../constants/theme";
 
 type IconName = keyof typeof Ionicons.glyphMap;
@@ -16,20 +15,14 @@ const RISK: Record<RiskLevel, { label: TranslationKey; color: string; tint: stri
   HIGH_RISK: { label: "report.riskHigh", color: Colors.danger, tint: Colors.dangerMuted, icon: "warning" },
 };
 
-const STAGE: Record<SessionStage, { label: TranslationKey; color: string; tint: string; icon: IconName }> = {
-  chatting: { label: "history.stageChat", color: Colors.info, tint: Colors.infoMuted, icon: "chatbubbles" },
-  drafted: { label: "history.stageDraft", color: Colors.warning, tint: Colors.warningMuted, icon: "document-text" },
-  evaluated: { label: "history.stageEvaluated", color: Colors.success, tint: Colors.successMuted, icon: "checkmark-done" },
-};
-
 export function riskColor(level: RiskLevel): string {
-  return RISK[level].color;
+  return (RISK[level] ?? RISK.MODERATE_RISK).color;
 }
 
-function Pill({ label, color, tint, icon }: { label: string; color: string; tint: string; icon: IconName }) {
+export function Pill({ label, color, tint, icon }: { label: string; color: string; tint: string; icon?: IconName }) {
   return (
     <View style={[styles.pill, { backgroundColor: tint }]}>
-      <Ionicons name={icon} size={12} color={color} />
+      {icon ? <Ionicons name={icon} size={12} color={color} /> : null}
       <Text style={[styles.pillText, { color }]} numberOfLines={1}>
         {label}
       </Text>
@@ -43,10 +36,16 @@ export function RiskBadge({ level }: { level: RiskLevel }) {
   return <Pill label={t(style.label)} color={style.color} tint={style.tint} icon={style.icon} />;
 }
 
-export function StageBadge({ stage }: { stage: SessionStage }) {
+export function SchemeBadge({ scheme }: { scheme: SchemeId }) {
   const { t } = useI18n();
-  const style = STAGE[stage] ?? STAGE.chatting;
-  return <Pill label={t(style.label)} color={style.color} tint={style.tint} icon={style.icon} />;
+  return (
+    <Pill
+      label={t(scheme === "micro" ? "scheme.micro" : "scheme.term")}
+      color={Colors.primaryText}
+      tint={Colors.primarySoft}
+      icon="business-outline"
+    />
+  );
 }
 
 const styles = StyleSheet.create({
@@ -58,6 +57,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 9,
     paddingVertical: 4,
     alignSelf: "flex-start",
+    maxWidth: "100%",
   },
-  pillText: { fontSize: FontSize.xs, fontWeight: "700", letterSpacing: 0.2 },
+  pillText: { fontSize: FontSize.xs, fontWeight: "700", letterSpacing: 0.2, flexShrink: 1 },
 });

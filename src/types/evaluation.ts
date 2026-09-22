@@ -1,5 +1,5 @@
 /**
- * @fileoverview Shared TypeScript interfaces for the SIH26091 Business Evaluation pipeline.
+ * @fileoverview Shared TypeScript interfaces for the business evaluation Cloud Function.
  *
  * These types define the contract of the `evaluate_business_idea` Firebase Callable
  * (functions/main.py) and its Firestore documents. The app itself currently runs the

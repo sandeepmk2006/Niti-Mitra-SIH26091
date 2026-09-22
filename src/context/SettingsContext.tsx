@@ -6,6 +6,8 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 
+import { loadStoredApiKey } from "../services/apiKey";
+
 const STORAGE_KEY = "nitimitra.settings";
 
 export interface AppSettings {
@@ -31,6 +33,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULTS);
 
   useEffect(() => {
+    // A Gemini key entered in Settings must be in place before the first request.
+    loadStoredApiKey().catch((error) => console.warn("[Settings] Could not load API key:", error));
     AsyncStorage.getItem(STORAGE_KEY)
       .then((raw) => {
         if (!raw) return;

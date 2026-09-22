@@ -1,6 +1,6 @@
 /**
- * Session detail — one saved conversation with its draft and report, live from Firestore.
- * Unfinished sessions can be resumed in the Evaluate tab.
+ * Conversation detail — a saved advisor conversation, live from Firestore. Can be resumed in the
+ * Advisor tab (with its linked study, if any) or deleted.
  */
 
 import React, { useEffect, useState } from "react";
@@ -9,13 +9,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { Redirect, useLocalSearchParams, useRouter } from "expo-router";
 
-import { StageBadge } from "../../src/components/badges";
 import { ChatBubble } from "../../src/components/ChatBubble";
-import { DraftCard } from "../../src/components/DraftCard";
-import { ReportView } from "../../src/components/ReportView";
-import { Button, EmptyState, FullScreenLoader, SectionLabel } from "../../src/components/ui";
+import { Button, EmptyState, FullScreenLoader } from "../../src/components/ui";
 import { useAuth } from "../../src/context/AuthContext";
 import { useChat } from "../../src/context/ChatContext";
+import { useStudies } from "../../src/hooks/useSessions";
 import { useI18n } from "../../src/i18n/I18nContext";
 import { deleteSession, subscribeToSession } from "../../src/services/HistoryService";
 import type { Session } from "../../src/types/session";
@@ -31,12 +29,12 @@ export default function SessionScreen() {
   const { user } = useAuth();
   const { t, locale } = useI18n();
   const { sessionId: activeSessionId, resumeSession, startNewChat } = useChat();
+  const { studies } = useStudies();
 
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
 
   const uid = user?.uid;
-
   useEffect(() => {
     if (!uid || !id) return;
     return subscribeToSession(
@@ -65,12 +63,10 @@ export default function SessionScreen() {
       {
         text: t("session.delete"),
         style: "destructive",
-        onPress: async () => {
+        onPress: () => {
           if (activeSessionId === session.id) startNewChat();
           goBack();
-          await deleteSession(user.uid, session.id).catch((err) =>
-            console.warn("[Session] Delete failed:", err)
-          );
+          deleteSession(user.uid, session.id).catch((err) => console.warn("[Session] Delete failed:", err));
         },
       },
     ]);
@@ -78,14 +74,14 @@ export default function SessionScreen() {
 
   const continueInChat = () => {
     if (!session) return;
-    resumeSession(session);
-    router.dismissTo("/(tabs)/evaluate");
+    resumeSession(session, studies.find((s) => s.id === session.studyId) ?? null);
+    router.dismissTo("/(tabs)/advisor");
   };
 
   return (
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <TouchableOpacity onPress={goBack} style={styles.iconButton} accessibilityLabel="Back">
+        <TouchableOpacity onPress={goBack} style={styles.iconButton} accessibilityLabel={t("common.back")}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle} numberOfLines={1}>
@@ -105,51 +101,37 @@ export default function SessionScreen() {
       ) : (
         <>
           <ScrollView contentContainerStyle={styles.content}>
-            <View style={styles.meta}>
-              <StageBadge stage={session.stage} />
-              <Text style={styles.date}>{formatDate(session.updatedAt, locale)}</Text>
-            </View>
+            <Text style={styles.date}>{formatDate(session.updatedAt, locale)}</Text>
             <Text style={styles.title}>{session.title || t("history.untitled")}</Text>
-
-            {session.report ? (
-              <View style={styles.block}>
-                <ReportView report={session.report} />
-              </View>
+            {session.studyTitle ? (
+              <TouchableOpacity
+                style={styles.studyLink}
+                disabled={!session.studyId}
+                onPress={() => session.studyId && router.push({ pathname: "/study/[id]", params: { id: session.studyId } })}
+              >
+                <Ionicons name="document-text-outline" size={16} color={Colors.primaryText} />
+                <Text style={styles.studyLinkText}>{t("advisor.about", { title: session.studyTitle })}</Text>
+              </TouchableOpacity>
             ) : null}
-
-            {session.draft ? (
-              <View style={styles.block}>
-                <DraftCard draft={session.draft} />
-              </View>
-            ) : null}
-
-            {session.messages.length > 0 ? (
-              <View style={styles.block}>
-                <SectionLabel>{t("session.conversation")}</SectionLabel>
-                <View style={styles.transcript}>
-                  {session.messages.map((message, index) => {
-                    const next = session.messages[index + 1];
-                    return (
-                      <ChatBubble
-                        key={message.id}
-                        role={message.role}
-                        text={message.text}
-                        meta={formatTime(message.createdAt, locale)}
-                        question={message.role === "assistant" ? message.question : null}
-                        answer={next?.role === "user" ? next.text : undefined}
-                      />
-                    );
-                  })}
-                </View>
-              </View>
-            ) : null}
-          </ScrollView>
-
-          {session.stage !== "evaluated" ? (
-            <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
-              <Button label={t("session.continue")} icon="chatbubbles-outline" onPress={continueInChat} />
+            <View style={styles.transcript}>
+              {session.messages.map((message, index) => {
+                const next = session.messages[index + 1];
+                return (
+                  <ChatBubble
+                    key={message.id}
+                    role={message.role}
+                    text={message.text}
+                    meta={formatTime(message.createdAt, locale)}
+                    question={message.role === "assistant" ? message.question : null}
+                    answer={next?.role === "user" ? next.text : undefined}
+                  />
+                );
+              })}
             </View>
-          ) : null}
+          </ScrollView>
+          <View style={[styles.footer, { paddingBottom: insets.bottom + 10 }]}>
+            <Button label={t("session.continue")} icon="chatbubbles-outline" onPress={continueInChat} />
+          </View>
         </>
       )}
     </View>
@@ -170,12 +152,22 @@ const styles = StyleSheet.create({
   },
   iconButton: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
   headerTitle: { flex: 1, fontSize: FontSize.md, fontWeight: "800", color: Colors.textPrimary, textAlign: "center" },
-  content: { padding: 20, paddingBottom: Spacing.xl },
-  meta: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 8 },
+  content: { padding: 20, paddingBottom: Spacing.xl, gap: 8 },
   date: { fontSize: FontSize.xs, color: Colors.textMuted, fontWeight: "600" },
-  title: { fontSize: FontSize.xl, fontWeight: "800", color: Colors.textPrimary, marginBottom: Spacing.md },
-  block: { marginBottom: Spacing.lg },
+  title: { fontSize: FontSize.xl, fontWeight: "800", color: Colors.textPrimary },
+  studyLink: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.primarySoft,
+  },
+  studyLinkText: { fontSize: FontSize.xs, fontWeight: "700", color: Colors.primaryText },
   transcript: {
+    marginTop: 8,
     backgroundColor: Colors.surfacePrimary,
     borderRadius: BorderRadius.lg,
     borderWidth: 1,

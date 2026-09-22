@@ -6,8 +6,9 @@
  * production should proxy these calls through a backend (e.g. a Cloud Function) instead.
  */
 
+import { getApiKey } from "./apiKey";
+
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
-const API_KEY = process.env.EXPO_PUBLIC_GEMINI_API_KEY ?? "";
 
 /** Fast model for conversational replies. */
 export const GEMINI_CHAT_MODEL =
@@ -95,9 +96,9 @@ async function generate(
   }: GenerateOptions,
   extraConfig: Record<string, unknown>
 ): Promise<string> {
-  if (!API_KEY) {
+  if (!getApiKey()) {
     throw new GeminiError(
-      "EXPO_PUBLIC_GEMINI_API_KEY is not set — add it to .env and restart Metro with `npx expo start -c`."
+      "No Gemini API key — set EXPO_PUBLIC_GEMINI_API_KEY in .env, or enter a key in Settings."
     );
   }
 
@@ -135,7 +136,7 @@ async function request(model: string, body: string, timeoutMs: number): Promise<
   try {
     response = await fetch(`${API_BASE}/${model}:generateContent`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": API_KEY },
+      headers: { "Content-Type": "application/json", "x-goog-api-key": getApiKey() },
       body,
       signal: controller.signal,
     });

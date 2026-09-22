@@ -1,13 +1,10 @@
 /**
- * @fileoverview ChatContext — state for the Evaluate tab's chat → draft → evaluation flow.
+ * @fileoverview ChatContext — the active advisor conversation.
  *
  * Lives above the tab navigator so the conversation survives tab switches, and mirrors every
- * change to Firestore (HistoryService) so History updates in real time and a session can be
- * resumed later. Stages:
- *
- *   chatting ──Evaluate──▶ drafted ──Proceed──▶ evaluated
- *       ▲                     │
- *       └──── Refine ─────────┘
+ * change to Firestore so History updates in real time and a conversation can be resumed later.
+ * A conversation can be linked to a feasibility study (opened from a report); the advisor then
+ * answers with that report as context.
  */
 
 import React, {
@@ -24,54 +21,37 @@ import React, {
 import { useAuth } from "./AuthContext";
 import { useI18n, TranslateFn } from "../i18n/I18nContext";
 import type { LanguageCode } from "../i18n/languages";
-import {
-  AdvisorContext,
-  draftIdea,
-  evaluateIdea,
-  getChatReply,
-} from "../services/AdvisorService";
-import { newSessionId, saveSession } from "../services/HistoryService";
-import type {
-  ChatMessage,
-  EvaluationReport,
-  IdeaDraft,
-  Session,
-  SessionStage,
-} from "../types/session";
-
-export type ChatBusyState = "replying" | "drafting" | "evaluating" | null;
-export type ChatErrorState = "reply" | "draft" | "evaluate" | null;
+import { getAdvisorReply } from "../services/AdvisorService";
+import { newDocumentId, saveSession } from "../services/HistoryService";
+import type { ChatMessage, Session } from "../types/session";
+import type { Study } from "../types/study";
 
 interface ActiveSession {
   /** Null until the first message is sent — nothing is written to Firestore before that. */
   id: string | null;
   title: string;
   language: LanguageCode;
-  stage: SessionStage;
   messages: ChatMessage[];
-  draft: IdeaDraft | null;
-  report: EvaluationReport | null;
+  study: Study | null;
+  studyTitle: string | null;
   createdAt: number;
 }
 
 interface ChatContextValue {
   sessionId: string | null;
   messages: ChatMessage[];
-  /** The advisor's last turn said it has everything it needs to draft. */
-  readyToEvaluate: boolean;
-  draft: IdeaDraft | null;
-  report: EvaluationReport | null;
-  stage: SessionStage;
-  busy: ChatBusyState;
-  error: ChatErrorState;
+  /** The opening advisor message to show before anything has been sent. */
+  intro: ChatMessage;
+  linkedStudyTitle: string | null;
+  busy: boolean;
+  error: boolean;
   hasConversation: boolean;
   sendMessage: (text: string) => Promise<void>;
   retry: () => Promise<void>;
-  generateDraft: () => Promise<void>;
-  proceed: () => Promise<void>;
-  refineDraft: () => void;
   startNewChat: () => void;
-  resumeSession: (session: Session) => void;
+  /** Start a fresh conversation about a study (from its report screen). */
+  startChatAboutStudy: (study: Study, title: string) => void;
+  resumeSession: (session: Session, study: Study | null) => void;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -79,54 +59,40 @@ const ChatContext = createContext<ChatContextValue | null>(null);
 const TITLE_MAX_LENGTH = 60;
 
 function emptySession(language: LanguageCode): ActiveSession {
-  return {
-    id: null,
-    title: "",
-    language,
-    stage: "chatting",
-    messages: [],
-    draft: null,
-    report: null,
-    createdAt: 0,
-  };
+  return { id: null, title: "", language, messages: [], study: null, studyTitle: null, createdAt: 0 };
 }
 
 function makeMessageId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/**
- * The opening turn: a fixed, translated question so the first tap needs no network round-trip.
- * It is stored as the first message once the user answers, so Gemini sees what was asked.
- */
-export function buildIntroMessage(t: TranslateFn): ChatMessage {
-  const option = (key: "food" | "tailor" | "shop" | "farm") => ({
-    label: t(`chat.opt.${key}`),
-    description: t(`chat.opt.${key}.desc`),
+/** The fixed, translated opening turn — generic, or about a linked study. */
+export function buildIntroMessage(t: TranslateFn, studyTitle: string | null): ChatMessage {
+  const option = (key: string) => ({
+    label: t(`${key}` as never),
+    description: t(`${key}d` as never),
   });
-  return {
-    id: "intro",
-    role: "assistant",
-    text: t("chat.intro"),
-    createdAt: Date.now(),
-    question: {
-      text: t("chat.firstQuestion"),
-      options: [option("food"), option("tailor"), option("shop"), option("farm")],
-    },
-    readyToEvaluate: false,
-  };
-}
-
-/** Details the advisor should ask about when the user refines a draft that has gaps. */
-function missingFromDraft(draft: IdeaDraft): string[] {
-  const focus: string[] = [];
-  const noRevenue = draft.monthlyRevenue === null;
-  if (noRevenue && draft.pricePerUnit === null) focus.push("selling price per unit");
-  if (noRevenue && draft.expectedMonthlyUnits === null) focus.push("expected sales per day or month");
-  if (draft.variableCostPerUnit === null) focus.push("material cost per unit");
-  if (draft.monthlyFixedCosts === null) focus.push("monthly fixed costs");
-  if (draft.startupInvestment === null) focus.push("total money needed to start");
-  return [...focus, ...draft.missingInfo];
+  return studyTitle
+    ? {
+        id: "intro",
+        role: "assistant",
+        text: t("advisor.studyIntro", { title: studyTitle }),
+        createdAt: Date.now(),
+        question: {
+          text: t("advisor.introQ"),
+          options: ["advisor.s1", "advisor.s2", "advisor.s3", "advisor.s4"].map(option),
+        },
+      }
+    : {
+        id: "intro",
+        role: "assistant",
+        text: t("advisor.intro"),
+        createdAt: Date.now(),
+        question: {
+          text: t("advisor.introQ"),
+          options: ["advisor.q1", "advisor.q2", "advisor.q3", "advisor.q4"].map(option),
+        },
+      };
 }
 
 function titleFrom(messages: ChatMessage[]): string {
@@ -139,56 +105,63 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const { language, t } = useI18n();
 
   const [session, setSession] = useState<ActiveSession>(() => emptySession(language));
-  const [busy, setBusy] = useState<ChatBusyState>(null);
-  const [error, setError] = useState<ChatErrorState>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(false);
 
-  // Async steps read the latest session through this ref so a late Gemini response can tell
-  // whether the user has since moved on to a different session.
+  // Async replies read the latest session through this ref so a late Gemini response can tell
+  // whether the user has since moved on to a different conversation.
   const sessionRef = useRef(session);
-  const busyRef = useRef<ChatBusyState>(null);
+  const busyRef = useRef(false);
 
   const uid = user?.uid ?? null;
 
-  // Saved profile answers go into every prompt so the advisor never re-asks them.
-  const advisorContext = useMemo<AdvisorContext>(
-    () => ({ language, fullName: user?.fullName, preferences: user?.preferences ?? null }),
-    [language, user?.fullName, user?.preferences]
-  );
+  const replace = useCallback((next: ActiveSession) => {
+    sessionRef.current = next;
+    setSession(next);
+    setError(false);
+    busyRef.current = false;
+    setBusy(false);
+  }, []);
 
   const commit = useCallback(
     (next: ActiveSession) => {
       sessionRef.current = next;
       setSession(next);
       if (!uid || !next.id) return;
-      const record: Session = {
+      saveSession(uid, {
         id: next.id,
-        title: next.draft?.title || next.title,
+        title: next.title,
         language: next.language,
-        stage: next.stage,
         messages: next.messages,
-        draft: next.draft,
-        report: next.report,
+        studyId: next.study?.id ?? null,
+        studyTitle: next.studyTitle,
         createdAt: next.createdAt,
         updatedAt: Date.now(),
-      };
-      saveSession(uid, record).catch((err) =>
-        console.warn("[Chat] Failed to save session:", err)
-      );
+      }).catch((err) => console.warn("[Chat] Failed to save conversation:", err));
     },
     [uid]
   );
 
-  const setBusyState = useCallback((state: ChatBusyState) => {
-    busyRef.current = state;
-    setBusy(state);
-  }, []);
+  const startNewChat = useCallback(() => replace(emptySession(language)), [language, replace]);
 
-  const startNewChat = useCallback(() => {
-    sessionRef.current = emptySession(language);
-    setSession(sessionRef.current);
-    setError(null);
-    setBusyState(null);
-  }, [language, setBusyState]);
+  const startChatAboutStudy = useCallback(
+    (study: Study, title: string) => replace({ ...emptySession(language), study, studyTitle: title }),
+    [language, replace]
+  );
+
+  const resumeSession = useCallback(
+    (saved: Session, study: Study | null) =>
+      replace({
+        id: saved.id,
+        title: saved.title,
+        language: saved.language,
+        messages: saved.messages,
+        study,
+        studyTitle: saved.studyTitle,
+        createdAt: saved.createdAt,
+      }),
+    [replace]
+  );
 
   // A different (or no) signed-in user must never see the previous user's conversation.
   useEffect(() => {
@@ -197,54 +170,56 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [uid]);
 
   const requestReply = useCallback(
-    async (snapshot: ActiveSession, focus: string[] = []) => {
-      setBusyState("replying");
-      setError(null);
+    async (snapshot: ActiveSession) => {
+      busyRef.current = true;
+      setBusy(true);
+      setError(false);
       try {
-        const turn = await getChatReply(snapshot.messages, advisorContext, t("chat.evaluate"), focus);
+        const turn = await getAdvisorReply(snapshot.messages, {
+          language: snapshot.language,
+          fullName: user?.fullName,
+          preferences: user?.preferences ?? null,
+          study: snapshot.study,
+        });
         if (sessionRef.current.id !== snapshot.id) return;
         const current = sessionRef.current;
         commit({
           ...current,
           messages: [
             ...current.messages,
-            {
-              id: makeMessageId(),
-              role: "assistant",
-              text: turn.message,
-              question: turn.question,
-              readyToEvaluate: turn.readyToEvaluate,
-              createdAt: Date.now(),
-            },
+            { id: makeMessageId(), role: "assistant", text: turn.message, question: turn.question, createdAt: Date.now() },
           ],
         });
       } catch (err) {
         console.warn("[Chat] Reply failed:", err);
-        if (sessionRef.current.id === snapshot.id) setError("reply");
+        if (sessionRef.current.id === snapshot.id) setError(true);
       } finally {
-        if (sessionRef.current.id === snapshot.id) setBusyState(null);
+        if (sessionRef.current.id === snapshot.id) {
+          busyRef.current = false;
+          setBusy(false);
+        }
       }
     },
-    [commit, advisorContext, setBusyState, t]
+    [commit, user?.fullName, user?.preferences]
   );
 
   const sendMessage = useCallback(
     async (text: string) => {
       const trimmed = text.trim();
       const current = sessionRef.current;
-      if (!trimmed || busyRef.current || current.stage !== "chatting") return;
+      if (!trimmed || busyRef.current) return;
 
       const isNew = current.id === null;
       const messages: ChatMessage[] = [
-        ...(isNew ? [buildIntroMessage(t)] : current.messages),
+        ...(isNew ? [buildIntroMessage(t, current.studyTitle)] : current.messages),
         { id: makeMessageId(), role: "user", text: trimmed, createdAt: Date.now() },
       ];
       const next: ActiveSession = {
         ...current,
-        id: current.id ?? (uid ? newSessionId(uid) : `local-${makeMessageId()}`),
+        id: current.id ?? (uid ? newDocumentId(uid, "sessions") : `local-${makeMessageId()}`),
         createdAt: isNew ? Date.now() : current.createdAt,
         language: isNew ? language : current.language,
-        title: current.title || titleFrom(messages),
+        title: current.title || current.studyTitle || titleFrom(messages),
         messages,
       };
       commit(next);
@@ -253,98 +228,28 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [commit, language, requestReply, t, uid]
   );
 
-  const generateDraft = useCallback(async () => {
-    const snapshot = sessionRef.current;
-    if (busyRef.current || !snapshot.messages.some((m) => m.role === "user")) return;
-
-    setBusyState("drafting");
-    setError(null);
-    try {
-      const draft = await draftIdea(snapshot.messages, advisorContext);
-      if (sessionRef.current.id !== snapshot.id) return;
-      commit({ ...sessionRef.current, draft, stage: "drafted" });
-    } catch (err) {
-      console.warn("[Chat] Draft failed:", err);
-      if (sessionRef.current.id === snapshot.id) setError("draft");
-    } finally {
-      if (sessionRef.current.id === snapshot.id) setBusyState(null);
-    }
-  }, [commit, advisorContext, setBusyState]);
-
-  const proceed = useCallback(async () => {
-    const snapshot = sessionRef.current;
-    if (busyRef.current || !snapshot.draft) return;
-
-    setBusyState("evaluating");
-    setError(null);
-    try {
-      const report = await evaluateIdea(snapshot.draft, advisorContext);
-      if (sessionRef.current.id !== snapshot.id) return;
-      commit({ ...sessionRef.current, report, stage: "evaluated" });
-    } catch (err) {
-      console.warn("[Chat] Evaluation failed:", err);
-      if (sessionRef.current.id === snapshot.id) setError("evaluate");
-    } finally {
-      if (sessionRef.current.id === snapshot.id) setBusyState(null);
-    }
-  }, [commit, advisorContext, setBusyState]);
-
-  const refineDraft = useCallback(() => {
-    if (busyRef.current) return;
-    const current = sessionRef.current;
-    const focus = current.draft ? missingFromDraft(current.draft) : [];
-    setError(null);
-    const next: ActiveSession = { ...current, draft: null, stage: "chatting" };
-    commit(next);
-    // Have the advisor ask straight away about whatever the draft was missing.
-    void requestReply(next, focus);
-  }, [commit, requestReply]);
-
   const retry = useCallback(async () => {
-    if (error === "reply") await requestReply(sessionRef.current);
-    else if (error === "draft") await generateDraft();
-    else if (error === "evaluate") await proceed();
-  }, [error, generateDraft, proceed, requestReply]);
+    if (error) await requestReply(sessionRef.current);
+  }, [error, requestReply]);
 
-  const resumeSession = useCallback(
-    (saved: Session) => {
-      sessionRef.current = {
-        id: saved.id,
-        title: saved.title,
-        language: saved.language,
-        stage: saved.stage,
-        messages: saved.messages,
-        draft: saved.draft,
-        report: saved.report,
-        createdAt: saved.createdAt,
-      };
-      setSession(sessionRef.current);
-      setError(null);
-      setBusyState(null);
-    },
-    [setBusyState]
-  );
+  const intro = useMemo(() => buildIntroMessage(t, session.studyTitle), [t, session.studyTitle]);
 
   const value = useMemo<ChatContextValue>(
     () => ({
       sessionId: session.id,
       messages: session.messages,
-      readyToEvaluate: !!session.messages[session.messages.length - 1]?.readyToEvaluate,
-      draft: session.draft,
-      report: session.report,
-      stage: session.stage,
+      intro,
+      linkedStudyTitle: session.studyTitle,
       busy,
       error,
       hasConversation: session.messages.length > 0,
       sendMessage,
       retry,
-      generateDraft,
-      proceed,
-      refineDraft,
       startNewChat,
+      startChatAboutStudy,
       resumeSession,
     }),
-    [session, busy, error, sendMessage, retry, generateDraft, proceed, refineDraft, startNewChat, resumeSession]
+    [session, intro, busy, error, sendMessage, retry, startNewChat, startChatAboutStudy, resumeSession]
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

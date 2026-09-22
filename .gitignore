@@ -31,3 +31,6 @@ functions/.venv/
 
 # Local env (Gemini key). Not in .easignore, so EAS still uploads it and inlines EXPO_PUBLIC_* values.
 .env
+
+# Downloaded build artifacts
+dist-apk/

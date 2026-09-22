@@ -11,7 +11,8 @@ import { Colors, BorderRadius } from "../../src/constants/theme";
 export { ErrorFallback as ErrorBoundary } from "../../src/components/ErrorFallback";
 
 /**
- * 4-tab navigation layout — Home | Evaluate | History | Settings.
+ * 5-tab navigation layout — Home | New study | Calculator | Advisor | History.
+ * Settings is a stack screen opened from Home.
  *
  * Also the onboarding gate: until a language is chosen, a user is signed in and they have been
  * through the preferences questionnaire once, it redirects to /language, /auth or /preferences.
@@ -43,31 +44,23 @@ export default function TabLayout() {
     >
       <Tabs.Screen
         name="index"
-        options={{
-          title: t("tabs.home"),
-          tabBarIcon: (props) => <TabIcon {...props} name="home" />,
-        }}
+        options={{ title: t("tabs.home"), tabBarIcon: (props) => <TabIcon {...props} name="home" /> }}
       />
       <Tabs.Screen
-        name="evaluate"
-        options={{
-          title: t("tabs.evaluate"),
-          tabBarIcon: (props) => <TabIcon {...props} name="sparkles" />,
-        }}
+        name="study"
+        options={{ title: t("tabs.study"), tabBarIcon: (props) => <TabIcon {...props} name="analytics" /> }}
+      />
+      <Tabs.Screen
+        name="calculator"
+        options={{ title: t("tabs.calculator"), tabBarIcon: (props) => <TabIcon {...props} name="calculator" /> }}
+      />
+      <Tabs.Screen
+        name="advisor"
+        options={{ title: t("tabs.advisor"), tabBarIcon: (props) => <TabIcon {...props} name="chatbubbles" /> }}
       />
       <Tabs.Screen
         name="history"
-        options={{
-          title: t("tabs.history"),
-          tabBarIcon: (props) => <TabIcon {...props} name="time" />,
-        }}
-      />
-      <Tabs.Screen
-        name="settings"
-        options={{
-          title: t("tabs.settings"),
-          tabBarIcon: (props) => <TabIcon {...props} name="settings" />,
-        }}
+        options={{ title: t("tabs.history"), tabBarIcon: (props) => <TabIcon {...props} name="time" /> }}
       />
     </Tabs>
   );
@@ -100,7 +93,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   tabLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: "600",
     letterSpacing: 0.2,
   },

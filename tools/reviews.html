@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<!--
+  Niti Mitra — reviews dashboard.
+  Shows the real in-app reviews stored at /users/{uid}/feedback/review (collection-group query).
+  Sign in with any Niti Mitra account (mobile number + 6-digit passcode). Requires the
+  firestore.rules in this repo to be deployed (signed-in users may read `feedback`).
+
+  Serve over http so Firebase Auth accepts the origin:
+    npx http-server . -p 5500     →  http://localhost:5500/tools/reviews.html   (run from the repo root)
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Niti Mitra — User Reviews</title>
+<style>
+  :root {
+    --orange: #F8921F; --orange-text: #B45309; --orange-soft: #FFF4E6; --orange-border: #FCD9AE;
+    --text: #1C1917; --text-2: #57534E; --muted: #6B6560; --border: #ECE8E3; --bg: #FAF8F5; --white: #fff;
+    --danger: #DC2626;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans", "Noto Sans Devanagari", "Noto Sans Tamil", "Noto Sans Telugu", "Noto Sans Bengali", sans-serif; background: var(--bg); color: var(--text); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 24px 56px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 28px; }
+  header img { width: 64px; height: 64px; object-fit: contain; }
+  header h1 { margin: 0; font-size: 28px; }
+  header p { margin: 4px 0 0; color: var(--text-2); }
+  .card { background: var(--white); border: 1px solid var(--border); border-radius: 16px; padding: 20px; box-shadow: 0 1px 6px rgba(28,25,23,.05); }
+  .login { max-width: 380px; margin: 40px auto; display: grid; gap: 12px; }
+  .login h2 { margin: 0 0 4px; }
+  label { font-size: 13px; font-weight: 600; color: var(--text-2); }
+  input { width: 100%; height: 46px; padding: 0 14px; border: 1px solid #D6D0C8; border-radius: 12px; font-size: 15px; }
+  button { height: 48px; border: 0; border-radius: 14px; background: var(--orange); color: #fff; font-weight: 700; font-size: 15px; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: default; }
+  .link { background: none; color: var(--orange-text); height: auto; font-weight: 600; font-size: 13px; }
+  .error { color: var(--danger); font-size: 14px; }
+  .summary { display: grid; grid-template-columns: 260px 1fr; gap: 28px; align-items: center; border-top: 5px solid var(--orange); }
+  .avg { text-align: center; }
+  .avg .big { font-size: 64px; font-weight: 800; color: var(--orange-text); line-height: 1; }
+  .avg .of { color: var(--muted); font-weight: 600; }
+  .stars { color: var(--orange); letter-spacing: 2px; font-size: 22px; }
+  .stars .off { color: #D6D0C8; }
+  .avg .count { margin-top: 6px; color: var(--text-2); font-weight: 600; }
+  .bars { display: grid; gap: 8px; }
+  .bar { display: grid; grid-template-columns: 56px 1fr 44px; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: var(--text-2); }
+  .track { height: 12px; background: #F5F3F0; border-radius: 6px; overflow: hidden; }
+  .fill { height: 100%; background: var(--orange); border-radius: 6px; }
+  .toolbar { display: flex; justify-content: space-between; align-items: center; margin: 28px 0 14px; gap: 12px; flex-wrap: wrap; }
+  .toolbar h2 { margin: 0; font-size: 20px; }
+  .filters { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: #fff; color: var(--text-2); font-weight: 600; font-size: 13px; }
+  .chip.active { background: var(--orange); border-color: var(--orange); color: #fff; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+  .review { display: grid; gap: 10px; }
+  .who { display: flex; align-items: center; gap: 10px; }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; background: var(--orange-soft); border: 1px solid var(--orange-border); display: grid; place-items: center; font-weight: 800; color: var(--orange-text); }
+  .who b { display: block; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .comment { margin: 0; font-size: 15px; line-height: 1.5; color: var(--text); }
+  .comment.empty { color: var(--muted); font-style: italic; }
+  .lang { display: inline-block; padding: 3px 9px; border-radius: 999px; background: var(--orange-soft); color: var(--orange-text); font-size: 12px; font-weight: 700; }
+  .empty-state { text-align: center; padding: 48px 20px; color: var(--text-2); }
+  footer { margin-top: 32px; text-align: center; color: var(--muted); font-size: 12px; }
+  [hidden] { display: none !important; }
+  @media (max-width: 640px) { .summary { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <img src="../assets/images/logo.png" alt="" onerror="this.remove()" />
+    <div>
+      <h1>Niti Mitra — User Reviews</h1>
+      <p>What entrepreneurs say about the app</p>
+    </div>
+  </header>
+
+  <form id="login" class="card login" hidden>
+    <h2>Sign in</h2>
+    <p class="meta" style="margin:0">Use any Niti Mitra account to view reviews.</p>
+    <div><label for="phone">Mobile number</label><input id="phone" inputmode="numeric" maxlength="10" placeholder="9876543210" required /></div>
+    <div><label for="pin">6-digit passcode</label><input id="pin" type="password" inputmode="numeric" maxlength="6" required /></div>
+    <button id="signin" type="submit">Show reviews</button>
+    <div id="loginError" class="error"></div>
+  </form>
+
+  <main id="dashboard" hidden>
+    <section class="card summary">
+      <div class="avg">
+        <div class="big" id="avg">–</div>
+        <div class="of">out of 5</div>
+        <div class="stars" id="avgStars"></div>
+        <div class="count" id="count"></div>
+      </div>
+      <div class="bars" id="bars"></div>
+    </section>
+
+    <div class="toolbar">
+      <h2>All reviews</h2>
+      <div class="filters" id="filters"></div>
+    </div>
+    <div class="grid" id="list"></div>
+    <div class="empty-state card" id="empty" hidden>No reviews yet. Reviews appear here as soon as users submit them from Settings → Rate &amp; review.</div>
+
+    <footer>Live data from the Niti Mitra app · <button class="link" id="signout" type="button">Sign out</button></footer>
+  </main>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-auth.js";
+  import { getFirestore, collectionGroup, onSnapshot } from "https://www.gstatic.com/firebasejs/11.10.0/firebase-firestore.js";
+
+  // Same public web config as src/services/firebase.ts
+  const app = initializeApp({
+    apiKey: "AIzaSyCDu_USTN3DIF_lwj7o9mOegxcbPQ8rsmc",
+    authDomain: "business-idea-7956c.firebaseapp.com",
+    projectId: "business-idea-7956c",
+    appId: "1:1046644548641:web:f1991b4379b6cdb2fb6f60",
+  });
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  const LANGS = { en: "English", hi: "हिन्दी", bn: "বাংলা", mr: "मराठी", ta: "தமிழ்", te: "తెలుగు" };
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const starHtml = (n) => "★".repeat(n) + `<span class="off">${"★".repeat(5 - n)}</span>`;
+
+  let reviews = [];
+  let filter = 0;
+  let unsubscribe = null;
+
+  function render() {
+    const total = reviews.length;
+    const avg = total ? reviews.reduce((s, r) => s + r.rating, 0) / total : 0;
+    $("avg").textContent = total ? avg.toFixed(1) : "–";
+    $("avgStars").innerHTML = starHtml(Math.round(avg));
+    $("count").textContent = `${total} review${total === 1 ? "" : "s"}`;
+    $("bars").innerHTML = [5, 4, 3, 2, 1].map((star) => {
+      const n = reviews.filter((r) => r.rating === star).length;
+      const pct = total ? Math.round((n / total) * 100) : 0;
+      return `<div class="bar"><span>${star} ★</span><div class="track"><div class="fill" style="width:${pct}%"></div></div><span>${n}</span></div>`;
+    }).join("");
+
+    $("filters").innerHTML = [0, 5, 4, 3, 2, 1].map((f) =>
+      `<button class="chip ${filter === f ? "active" : ""}" data-f="${f}">${f === 0 ? "All" : f + " ★"}</button>`).join("");
+    $("filters").querySelectorAll("button").forEach((b) => b.onclick = () => { filter = Number(b.dataset.f); render(); });
+
+    const shown = reviews.filter((r) => !filter || r.rating === filter);
+    $("empty").hidden = total > 0;
+    $("list").innerHTML = shown.map((r) => {
+      const name = r.name || "Niti Mitra user";
+      const date = r.createdAt ? new Date(r.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
+      return `<article class="card review">
+        <div class="who"><div class="avatar">${esc(name[0].toUpperCase())}</div>
+          <div><b>${esc(name)}</b><span class="meta">${esc(date)}</span></div></div>
+        <div class="stars">${starHtml(r.rating)}</div>
+        <p class="comment ${r.comment ? "" : "empty"}">${r.comment ? esc(r.comment) : "No comment"}</p>
+        <div>${r.language ? `<span class="lang">${esc(LANGS[r.language] ?? r.language)}</span>` : ""}</div>
+      </article>`;
+    }).join("");
+  }
+
+  onAuthStateChanged(auth, (user) => {
+    $("login").hidden = !!user;
+    $("dashboard").hidden = !user;
+    if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+    if (!user) return;
+    unsubscribe = onSnapshot(collectionGroup(db, "feedback"), (snap) => {
+      reviews = snap.docs.map((d) => d.data())
+        .filter((r) => typeof r.rating === "number")
+        .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+      render();
+    }, (err) => {
+      $("list").innerHTML = "";
+      $("empty").hidden = false;
+      $("empty").textContent = err.code === "permission-denied"
+        ? "Permission denied — deploy the latest firestore.rules (firebase deploy --only firestore:rules)."
+        : `Couldn't load reviews: ${err.message}`;
+    });
+  });
+
+  $("login").onsubmit = async (e) => {
+    e.preventDefault();
+    const phone = $("phone").value.replace(/\D/g, "").slice(-10);
+    const pin = $("pin").value;
+    $("loginError").textContent = "";
+    $("signin").disabled = true;
+    try {
+      await signInWithEmailAndPassword(auth, `${phone}@sih26091.app`, pin);
+    } catch {
+      $("loginError").textContent = "Incorrect mobile number or passcode.";
+    } finally {
+      $("signin").disabled = false;
+    }
+  };
+  $("signout").onclick = () => signOut(auth);
+</script>
+</body>
+</html>

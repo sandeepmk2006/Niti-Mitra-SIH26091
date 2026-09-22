@@ -17,6 +17,12 @@
         {
           "microphonePermission": "Niti Mitra uses the microphone so you can speak your answers instead of typing."
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Niti Mitra uses your location to study the market around your village."
+        }
       ]
     ],
     "experiments": {
@@ -29,14 +35,17 @@
         "backgroundColor": "#FFFFFF"
       },
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "ios": {
       "bundleIdentifier": "com.sih26091.businessadvisory",
       "supportsTablet": true,
       "infoPlist": {
-        "NSMicrophoneUsageDescription": "Niti Mitra uses the microphone so you can speak your answers instead of typing."
+        "NSMicrophoneUsageDescription": "Niti Mitra uses the microphone so you can speak your answers instead of typing.",
+        "NSLocationWhenInUseUsageDescription": "Niti Mitra uses your location to study the market around your village."
       }
     },
     "web": {
