@@ -1,0 +1,18 @@
+# Firebase Gen 2 Cloud Functions — Python 3.11
+# SIH26091: AI-Driven Hyper-Local Business Advisory
+
+# Firebase SDK
+firebase-functions>=0.4.0
+firebase-admin>=6.4.0
+
+# LangGraph Multi-Agent Pipeline
+langgraph>=0.2.0
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-google-genai>=2.0.0
+
+# HTTP requests for Google Places / OSM Overpass API
+requests>=2.31.0
+
+# Pydantic for structured state validation
+pydantic>=2.5.0

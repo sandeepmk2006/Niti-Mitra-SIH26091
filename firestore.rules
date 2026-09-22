@@ -1,0 +1,12 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each signed-in user can read and write only their own profile and everything under it:
+    // /users/{uid}/sessions (chat, drafts, reports from the app) and /users/{uid}/ideas
+    // (written by the evaluate_business_idea Cloud Function via the Admin SDK, which bypasses rules).
+    match /users/{userId}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "expo": {
+    "name": "Niti Mitra",
+    "slug": "sih26091-business-advisory",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "sih26091",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-dev-client",
+      "expo-asset",
+      "expo-font",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Niti Mitra uses the microphone so you can speak your answers instead of typing."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "android": {
+      "package": "com.sih26091.businessadvisory",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.sih26091.businessadvisory",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Niti Mitra uses the microphone so you can speak your answers instead of typing."
+      }
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "extra": {
+      "router": {
+        "origin": false
+      },
+      "eas": {
+        "projectId": "08493979-15d7-4313-a060-b745a66da353"
+      }
+    },
+    "icon": "./assets/images/icon.png",
+    "splash": {
+      "image": "./assets/images/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFFFFF"
+    }
+  }
+}
